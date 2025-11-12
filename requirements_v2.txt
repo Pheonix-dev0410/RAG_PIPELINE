@@ -1,0 +1,37 @@
+# Enhanced RAG Pipeline - Production Ready
+# Python 3.9+
+
+# FastAPI and server
+fastapi
+uvicorn[standard]
+python-multipart
+
+# LangChain - Updated to non-deprecated packages
+langchain
+langchain-core
+langchain-community
+langchain-classic
+langchain-huggingface
+langchain-text-splitters
+
+# OpenAI
+openai
+
+# Vector store
+faiss-cpu
+
+# Embeddings (will be pulled in by langchain-huggingface)
+sentence-transformers
+
+# BM25 for hybrid search
+rank-bm25
+
+# PDF processing
+pymupdf
+
+# Environment variables
+python-dotenv
+
+# Utilities
+pydantic
+
