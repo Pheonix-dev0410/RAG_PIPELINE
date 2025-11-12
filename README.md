@@ -20,7 +20,9 @@ python main_v2.py
 
 ### 2. Upload PDF
 ```bash
-curl -X POST http://localhost:8000/upload -F "file=@temp.pdf"
+curl -X POST http://localhost:8000/upload \
+  -F "file=@your_courses.pdf" \
+  -F "user_name=Pranav"
 ```
 
 ### 3. Ask Questions
@@ -60,9 +62,10 @@ Automatically detects user intent:
 - Sparse keyword search (BM25) for exact matches
 - Combined retrieval for best accuracy
 
-### 5. **Course-Based Chunking**
+### 5. **Smart PDF Parsing**
+- PyMuPDF for superior text extraction (faster, more accurate than pypdf)
+- Line-by-line parser - NO REGEX! Clean, maintainable code
 - Preserves complete course metadata in single chunks
-- Improves retrieval accuracy for structured educational content
 - Maintains semantic integrity
 
 ### 6. **Session Management**
@@ -134,16 +137,15 @@ campusclature-main/
 ├── main_v2.py                  # FastAPI application
 ├── requirements_v2.txt         # Dependencies
 ├── .env                        # API keys (create this)
-├── temp.pdf                    # Course data
+├── .gitignore                  # Git ignore rules
+├── README.md                   # This file
 ├── app/
 │   ├── rag_pipeline_v2.py     # Core RAG logic
 │   ├── config_v2.py           # Configuration
-│   ├── pdf_loader_v2.py       # PDF processing
-│   ├── course_chunker.py      # Custom chunking
+│   ├── pdf_loader_v2.py       # PDF processing with PyMuPDF
+│   ├── course_chunker.py      # Line-by-line parser
 │   └── session_manager.py     # Session handling
-├── faiss_index/               # Vector store (auto-generated)
-├── TEST_COMMANDS.sh           # Automated tests
-└── RAG_Pipeline_Collection.postman_collection.json
+└── faiss_index/               # Vector store (auto-generated)
 ```
 
 ---
@@ -151,12 +153,14 @@ campusclature-main/
 ## 🔧 Technical Stack
 
 - **Framework**: FastAPI
-- **LLM**: OpenAI GPT-4o
-- **Vector Store**: FAISS
+- **LLM**: OpenAI GPT-4o with Structured Output
+- **Vector Store**: FAISS (dense vectors)
+- **Sparse Retrieval**: BM25 (rank-bm25)
+- **PDF Processing**: PyMuPDF (fitz) - 3-5x faster than pypdf
 - **Embeddings**: HuggingFace Sentence Transformers (all-mpnet-base-v2)
-- **Sparse Retrieval**: BM25
 - **Session Store**: In-memory with LRU eviction
 - **Validation**: Pydantic
+- **Parsing**: Line-by-line state machine (NO REGEX!)
 
 ---
 
@@ -223,25 +227,31 @@ Interactive API documentation.
 
 ## 🧪 Testing
 
-### Automated Tests
+### Test Video Retrieval
 ```bash
-./TEST_COMMANDS.sh
-```
-
-### Manual Tests
-```bash
-# Test video retrieval
 curl -X POST http://localhost:8000/ask \
   -H "Content-Type: application/json" \
-  -d '{"question": "math for class 10", "session_id": "test", "user_name": "User"}'
-
-# Test follow-up (same session_id)
-curl -X POST http://localhost:8000/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question": "What topics are covered?", "session_id": "test", "user_name": "User"}'
+  -d '{"question": "English grammar class 6", "user_name": "Pranav"}'
 ```
 
-**Postman Collection**: Import `RAG_Pipeline_Collection.postman_collection.json`
+### Test Follow-up (Transcript Mode)
+Use the `session_id` from the previous response:
+```bash
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "What are the types of tenses?", 
+    "session_id": "SESSION_ID_HERE",
+    "user_name": "Pranav"
+  }'
+```
+
+### Test Educational Fallback
+```bash
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "quantum physics course", "user_name": "Pranav"}'
+```
 
 ---
 
@@ -255,27 +265,31 @@ curl -X POST http://localhost:8000/ask \
 - ❌ **Old**: Pure FAISS (768 results!)
 - ✅ **New**: Hybrid FAISS + BM25 (5 relevant results)
 
-### 3. **Better Chunking**
-- ❌ **Old**: 500-char chunks breaking course metadata
-- ✅ **New**: Course-based chunking preserving semantic integrity
+### 3. **Better PDF Processing**
+- ❌ **Old**: PyPDF2 with double-space issues
+- ✅ **New**: PyMuPDF (3-5x faster, better text extraction)
 
-### 4. **Reliable Parsing**
+### 4. **Cleaner Parsing**
+- ❌ **Old**: Messy regex patterns `r'(?:Transcript|Transcripts):\s*(.+)'`
+- ✅ **New**: Simple line-by-line parser with `line.startswith("Course ID:")`
+
+### 5. **Reliable Data Extraction**
 - ❌ **Old**: Regex-based URL extraction (fragile)
 - ✅ **New**: OpenAI structured output with Pydantic (type-safe)
 
-### 5. **Smart Mode Detection**
+### 6. **Smart Mode Detection**
 - ❌ **Old**: Single mode RAG
 - ✅ **New**: Dual-mode with automatic context detection
 
-### 6. **Anti-Hallucination**
+### 7. **Anti-Hallucination**
 - ❌ **Old**: LLM could generate fake links
 - ✅ **New**: Validates all links against source documents
 
-### 7. **Natural Responses**
+### 8. **Natural Responses**
 - ❌ **Old**: "Video not found" errors
 - ✅ **New**: Educational responses: "While we don't have this course yet, here's what you should know..."
 
-### 8. **Better Embeddings**
+### 9. **Better Embeddings**
 - ❌ **Old**: all-MiniLM-L6-v2 (384 dim)
 - ✅ **New**: all-mpnet-base-v2 (768 dim, better accuracy)
 
@@ -378,13 +392,15 @@ Bot:  "Hey Pranav! Quantum physics is fascinating - it explores how particles
 ## 📦 Dependencies
 
 See `requirements_v2.txt` for full list. Key packages:
-- fastapi
-- langchain (community, core, classic, huggingface)
-- openai
-- faiss-cpu
-- sentence-transformers
-- pydantic
-- python-dotenv
+- `fastapi` - Web framework
+- `langchain-*` (community, core, classic, huggingface, text-splitters) - RAG utilities
+- `openai` - LLM API with structured output
+- `faiss-cpu` - Dense vector search
+- `rank-bm25` - Sparse keyword search
+- `sentence-transformers` - Embeddings
+- `pymupdf` - PDF processing (PyMuPDF/fitz)
+- `pydantic` - Data validation
+- `python-dotenv` - Environment variables
 
 ---
 
@@ -414,7 +430,18 @@ Enhanced RAG pipeline with production-ready features
 
 ---
 
-**Questions?** Check `/docs` endpoint or test with Postman collection.
+## 🌟 Highlights
+
+- ✅ **NO REGEX HELL**: Clean line-by-line parser
+- ✅ **FAST PDF**: PyMuPDF 3-5x faster than pypdf
+- ✅ **HYBRID SEARCH**: FAISS + BM25 for best accuracy
+- ✅ **TYPE SAFE**: Pydantic + OpenAI structured output
+- ✅ **ANTI-HALLUCINATION**: Validates all responses
+- ✅ **PRODUCTION READY**: Rate limiting, sessions, error handling
+
+---
+
+**Questions?** Check the `/docs` endpoint at http://localhost:8000/docs
 
 **Status**: ✅ Production Ready
 
