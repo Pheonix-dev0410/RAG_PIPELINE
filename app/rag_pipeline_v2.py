@@ -68,22 +68,24 @@ VIDEO_RETRIEVAL_PROMPT = """You are Welida, a friendly and knowledgeable learnin
 
 **YOUR JOB:**
 1. If the user asks to learn something and a relevant video EXISTS in the "Available Videos" below, return that exact video link.
-2. If NO relevant video exists, provide a helpful educational response instead.
+2. If NO relevant video exists, YOU become their teacher and provide a comprehensive educational lesson on the topic.
 
 **CRITICAL RULES FOR VIDEO LINKS:**
 - You MUST extract the video link EXACTLY as it appears in the "Available Videos" section below.
 - DO NOT create, modify, or hallucinate video links - only use links that are explicitly provided.
 - ONLY return a video_link if it exists in the list below.
 
-**WHEN NO VIDEO EXISTS:**
-Instead of just saying "not available", be helpful and educational:
-1. Give a brief, friendly introduction to the topic they asked about (2-3 sentences)
-2. Mention: "We don't have a dedicated course on this yet, but we're working on it!"
-3. Offer: "In the meantime, I can help answer your questions about [topic] or guide you to related courses we do have."
-4. Use their name naturally and keep it warm and conversational.
+**WHEN NO VIDEO EXISTS - YOU ARE THE TEACHER:**
+Act as their personal tutor and provide a high-quality educational response:
+1. Use their name warmly to create a personal connection
+2. Provide a clear, engaging explanation of the topic (4-6 sentences)
+3. Break down concepts in an easy-to-understand way
+4. Use examples, analogies, or real-world applications where relevant
+5. End by offering to dive deeper: "Would you like me to explain any specific aspect in more detail?"
+6. Be enthusiastic and encouraging - make learning exciting!
 
 **Example (when no video exists):**
-"Hey Pranav! Quantum physics is a fascinating subject that explores how particles behave at the smallest scales - it's all about things like atoms, photons, and energy. While we don't have a dedicated course on quantum physics for grade 1 yet, we're working on it! In the meantime, I can help answer any questions you have about science concepts, or I can show you our science courses that build a great foundation."
+"Hey Pranav! Let me teach you about quantum physics - it's absolutely fascinating! Quantum physics explores the behavior of matter and energy at the tiniest scales imaginable - we're talking about atoms, electrons, and photons. At this scale, particles don't follow the normal rules we see in everyday life. For example, an electron can actually be in multiple places at once until we observe it! Think of it like a coin spinning in the air - it's both heads and tails until it lands. This strange behavior is what makes quantum computers possible and why understanding quantum mechanics is revolutionizing technology. Would you like me to explain any specific aspect in more detail, like wave-particle duality or quantum entanglement?"
 
 **Available Videos:**
 {context}
@@ -93,7 +95,7 @@ Instead of just saying "not available", be helpful and educational:
 
 **User Question:** {question}
 
-**Your Response (return video_link if it exists, otherwise provide helpful educational response):**"""
+**Your Response (return video_link if it exists, otherwise teach the topic yourself):**"""
 
 # Prompt for TRANSCRIPT Q&A (when transcripts exist)
 TRANSCRIPT_QA_PROMPT = """You are Welida, a friendly and engaging video learning assistant. The user is asking about a video they recently watched.
@@ -411,15 +413,17 @@ def query_with_structured_output(
 
 RULES:
 1. If a relevant video EXISTS in the context, return the video_link (exact URL from context) and video_title.
-2. If NO relevant video exists:
+2. If NO relevant video exists - YOU ARE THE TEACHER:
    - Set video_link and video_title to null
-   - Provide a helpful educational response in the 'answer' field that:
-     * Gives a brief intro to the topic (2-3 sentences)
-     * Mentions "We don't have a dedicated course on this yet, but we're working on it!"
-     * Offers: "In the meantime, I can help answer your questions about [topic]"
-     * Uses the user's name naturally
+   - In the 'answer' field, provide a comprehensive educational lesson:
+     * Use the user's name warmly to create personal connection
+     * Provide clear, engaging explanation (4-6 sentences)
+     * Break down concepts in easy-to-understand way
+     * Use examples, analogies, or real-world applications
+     * End with: "Would you like me to explain any specific aspect in more detail?"
+     * Be enthusiastic and encouraging - make learning exciting!
 3. NEVER make up URLs - only use URLs that actually exist in the context
-4. Keep educational responses warm, conversational, and helpful
+4. When teaching (no video), provide HIGH-QUALITY educational content as if you're their personal tutor
 """
             response_format = VideoLinkResponse
         else:
@@ -461,8 +465,8 @@ Provide your response:"""
                 {"role": "user", "content": user_prompt}
             ],
             response_format=response_format,
-            temperature=0.3 if mode == "video" else 0.7,
-            max_tokens=600 if mode == "video" else 800,  # Increased for educational responses
+            temperature=0.5 if mode == "video" else 0.7,  # Slightly higher for natural teaching tone
+            max_tokens=1000 if mode == "video" else 800,  # High token limit for comprehensive teaching
         )
         
         # Parse the structured output
@@ -475,6 +479,67 @@ Provide your response:"""
     except Exception as e:
         logger.error(f"Error in structured output query: {e}", exc_info=True)
         raise
+
+# ============================================================================
+# RANDOMIZATION FOR DUPLICATE COURSES
+# ============================================================================
+
+def randomize_duplicate_courses(source_docs: List) -> List:
+    """
+    Randomize selection when multiple videos exist for the same course.
+    
+    Groups documents by course identifier (title + description) and randomly
+    selects one document from each group. This ensures users get different
+    videos each time they ask for the same course.
+    
+    Args:
+        source_docs: List of retrieved documents
+        
+    Returns:
+        List of documents with duplicates randomly selected
+    """
+    if not source_docs:
+        return source_docs
+    
+    from collections import defaultdict
+    
+    # Group documents by course identifier
+    course_groups = defaultdict(list)
+    
+    for doc in source_docs:
+        # Create a unique identifier for the course based on title and description
+        # Extract title and description from content
+        content = doc.page_content.lower()
+        
+        # Try to extract title
+        title_match = re.search(r'title\s*:\s*([^\n]+)', content, re.IGNORECASE)
+        title = title_match.group(1).strip() if title_match else ""
+        
+        # Try to extract description
+        desc_match = re.search(r'description\s*:\s*([^\n]+)', content, re.IGNORECASE)
+        description = desc_match.group(1).strip() if desc_match else ""
+        
+        # Create identifier (use first 100 chars of title + description)
+        course_id = f"{title[:100]}_{description[:100]}"
+        
+        # If no title/description found, treat each as unique (don't group)
+        if not title and not description:
+            course_id = f"unique_{id(doc)}"
+        
+        course_groups[course_id].append(doc)
+    
+    # Randomly select one document from each group
+    randomized_docs = []
+    for course_id, docs in course_groups.items():
+        if len(docs) > 1:
+            selected = random.choice(docs)
+            logger.info(f"🎲 Randomized: {len(docs)} videos for course, selected one randomly")
+            randomized_docs.append(selected)
+        else:
+            randomized_docs.append(docs[0])
+    
+    return randomized_docs
+
 
 # ============================================================================
 # MAIN QUERY INTERFACE
@@ -538,6 +603,10 @@ def query_rag_system(
         
         # Retrieve relevant documents
         source_docs = retriever.invoke(question)
+        
+        # Apply randomization for video mode to ensure different videos for same course
+        if mode == "video":
+            source_docs = randomize_duplicate_courses(source_docs)
         
         # Build context string from retrieved documents
         context = "\n\n".join([doc.page_content for doc in source_docs])
@@ -701,12 +770,12 @@ def process_structured_response(
             else:
                 # Link was hallucinated! Return educational fallback from answer field
                 logger.warning(f"LLM hallucinated link: {video_link}. Using answer field instead.")
-                result["answer"] = answer or "I don't have a specific course on that topic yet."
+                result["answer"] = answer or "Let me help you with that! Could you tell me more about what you'd like to learn?"
                 result["video_link"] = None
                 result["video_title"] = None
         else:
             # No link returned - use the educational answer from structured response
-            result["answer"] = answer or "I don't have a specific course on that topic yet."
+            result["answer"] = answer or "Let me help you with that! Could you tell me more about what you'd like to learn?"
             result["video_link"] = None
             result["video_title"] = None
     
